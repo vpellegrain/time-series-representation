@@ -24,7 +24,7 @@ from sklearn.preprocessing import MinMaxScaler
 # Importing Data & Preprocessing
 
 ```{python}
-path = 'Datasets/NASA C-MAPSS/'
+path = '../Datasets/NASA C-MAPSS/'
 text_files = [f for f in os.listdir(path) if f.endswith('.txt') and not f.startswith('r')]
 dataframe = [os.path.splitext(f)[0] for f in text_files]
 sensor_columns = ["sensor {}".format(s) for s in range(1, 22)]
@@ -117,8 +117,8 @@ for i in range(4):
 ```
 
 ```{python}
-pkl.dump(trainsets, open("Datasets/NASA C-MAPSS/trainsets.p","wb"))
-pkl.dump(testsets, open("Datasets/NASA C-MAPSS/testsets.p","wb"))
+pkl.dump(trainsets, open("trainsets.p","wb"))
+pkl.dump(testsets, open("testsets.p","wb"))
 ```
 
 # Training
@@ -367,8 +367,8 @@ def get_train_valid_loader(data = 1, batch_size = 512, valid_size = 0.05, shuffl
 ```
 
 ```{python}
-trainsets = pkl.load(open("Datasets/NASA C-MAPSS/trainsets.p","rb"))
-testsets = pkl.load(open("Datasets/NASA C-MAPSS/testsets.p","rb"))
+trainsets = pkl.load(open("trainsets.p","rb"))
+testsets = pkl.load(open("testsets.p","rb"))
 
 train, val = get_train_valid_loader(data = 4)
 model = CNN()
@@ -656,8 +656,8 @@ def check_accuracy_classif(loader, model, device = torch.device('cpu'), print_gr
 ```
 
 ```{python}
-trainsets = pkl.load(open("Datasets/NASA C-MAPSS/trainsets.p","rb"))
-testsets = pkl.load(open("Datasets/NASA C-MAPSS/testsets.p","rb"))
+trainsets = pkl.load(open("trainsets.p","rb"))
+testsets = pkl.load(open("testsets.p","rb"))
 
 train, val = get_train_valid_loader(data = 4)
 model = CNN_classif()
