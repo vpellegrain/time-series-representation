@@ -1,0 +1,732 @@
+---
+jupyter:
+  jupytext:
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.0'
+      jupytext_version: 1.0.5
+  kernelspec:
+    display_name: Python 3
+    language: python
+    name: python3
+---
+
+```{python}
+import re, os
+import numpy as np
+import pandas as pd
+import pickle as pkl
+from os.path import basename, join
+from sklearn.preprocessing import MinMaxScaler
+```
+
+# Importing Data & Preprocessing
+
+```{python}
+path = 'Datasets/NASA C-MAPSS/'
+text_files = [f for f in os.listdir(path) if f.endswith('.txt') and not f.startswith('r')]
+dataframe = [os.path.splitext(f)[0] for f in text_files]
+sensor_columns = ["sensor {}".format(s) for s in range(1, 22)]
+info_columns = ['dataset_id', 'unit_id', 'cycle', 'setting 1', 'setting 2', 'setting 3']
+label_columns = ['dataset_id', 'unit_id', 'rul']
+settings = ['setting 1', 'setting 2', 'setting 3']
+
+
+test_data = []
+train_data = []
+RUL_data = []
+```
+
+```{python}
+def get_RUL(dataframe, Lifetime):
+    return Lifetime.loc[(dataframe['dataset_id'], dataframe['unit_id'])] - dataframe['cycle']
+def RUL_by_parts(df, RUL=130):
+    if df['RUL'] > RUL: return RUL
+    if df['RUL'] <= RUL: return df['RUL']
+    
+```
+
+```{python}
+for file in text_files:
+    print(file)
+
+    if re.match('RUL*', file):
+        subset_df = pd.read_csv(path + file, delimiter=r"\s+", header=None)
+        unit_id = range(1, subset_df.shape[0] + 1)
+        subset_df.insert(0, 'unit_id', unit_id)
+        dataset_id = basename(file).split("_")[1][:5]
+        subset_df.insert(0, 'dataset_id', dataset_id)
+        RUL_data.append(subset_df)
+
+    if re.match('test*', file):
+        subset_df = pd.read_csv(path + file, delimiter=r"\s+", header=None, usecols=range(26))
+        dataset_id = basename(file).split("_")[1][:5]
+        subset_df.insert(0, 'dataset_id', dataset_id)
+        test_data.append(subset_df)
+
+    if re.match('train*', file):
+        subset_df = pd.read_csv(path + file, delimiter=r"\s+", header=None, usecols=range(26))
+        dataset_id = basename(file).split("_")[1][:5]
+        subset_df.insert(0, 'dataset_id', dataset_id)
+        train_data.append(subset_df)
+```
+
+```{python}
+df_train = pd.concat(train_data, ignore_index=True)
+df_train.columns = info_columns + sensor_columns
+df_train.sort_values(by=['dataset_id', 'unit_id', 'cycle'], inplace=True)
+
+df_test = pd.concat(test_data, ignore_index=True)
+df_test.columns = info_columns + sensor_columns
+df_test.sort_values(by=['dataset_id', 'unit_id', 'cycle'], inplace=True)
+
+df_RUL = pd.concat(RUL_data, ignore_index=True)
+df_RUL.columns = label_columns
+df_RUL.sort_values(by=['dataset_id', 'unit_id'], inplace=True)
+```
+
+```{python}
+df_train
+```
+
+```{python}
+RUL_train = df_train.groupby(['dataset_id', 'unit_id'])['cycle'].max()
+
+RUL_test = df_test.groupby(['dataset_id', 'unit_id'])['cycle'].max() + df_RUL.groupby(['dataset_id', 'unit_id'])[
+'rul'].max()
+
+df_train['RUL'] = df_train.apply(lambda r: get_RUL(r, RUL_train), axis=1)
+df_train['RUL'] = df_train.apply(lambda r: RUL_by_parts(r, 130), axis=1)
+
+df_test['RUL'] = df_test.apply(lambda r: get_RUL(r, RUL_test), axis=1)
+df_test['RUL'] = df_test.apply(lambda r: RUL_by_parts(r, 130), axis=1)
+
+df_train.set_index(['dataset_id', 'unit_id'], inplace=True)
+df_test.set_index(['dataset_id', 'unit_id'], inplace=True)
+```
+
+```{python}
+# remove constant sensors and settings and apply minmax scaler
+trainsets = dict.fromkeys(["FD001","FD002","FD003","FD004"])
+testsets= dict.fromkeys(["FD001","FD002","FD003","FD004"])
+
+scaler = MinMaxScaler(feature_range=(-1,1))
+
+for i in range(4):
+    trainsets["FD00"+str(i+1)] = df_train.loc["FD00"+str(i+1)][["cycle","sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]]
+    trainsets["FD00"+str(i+1)][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21"]]=scaler.fit_transform(df_train.loc["FD00"+str(i+1)][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21"]])
+    testsets["FD00"+str(i+1)] = df_test.loc["FD00"+str(i+1)][["cycle","sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]]
+    testsets["FD00"+str(i+1)][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21"]]=scaler.fit_transform(testsets["FD00"+str(i+1)][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21"]])
+```
+
+```{python}
+pkl.dump(trainsets, open("Datasets/NASA C-MAPSS/trainsets.p","wb"))
+pkl.dump(testsets, open("Datasets/NASA C-MAPSS/testsets.p","wb"))
+```
+
+# Training
+
+```{python}
+import re, os
+import numpy as np
+import pandas as pd
+import pickle as pkl
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim 
+from torch.autograd import Variable
+from torch.utils.data import DataLoader
+from torch.utils.data import sampler
+import matplotlib.pyplot as plt
+# %matplotlib inline
+```
+
+```{python}
+def rwindows(a, window): 
+    # retourne une fenếtre temporelle de taille window d'un tableau a
+    if a.ndim == 1:
+        a = a.reshape(-1, 1)
+    shape = a.shape[0] - window + 1, window, a.shape[-1]
+    strides = (a.strides[0],) + a.strides
+    windows = np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+    return np.squeeze(windows)
+```
+
+```{python}
+class Dataset_Nasa(torch.utils.data.Dataset):
+  def __init__(self, dataset, transform=None, train = True, window = 30):
+        #Initialization
+        df = trainsets["FD00"+str(dataset)] if train else testsets["FD00"+str(dataset)]
+        #remove lines whose number of cycles is below the window size
+        df = df.drop(list(set(df[df["cycle"] > window].index.tolist()) ^ set(range(1,df.index.tolist()[-1]+1))), axis = 0)
+        if not train:
+            # take only the temporal window on last cycles for test datapoints
+            df_last = [df.loc[i].set_index('cycle').iloc[(-window-1):-1] for i in list(set(df.index.tolist()))]
+            df_window = np.vstack([rwindows(a[["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]].values,window) for a in df_last]).reshape((-1,window,15))
+        else:
+            df_window = np.vstack([rwindows(df.loc[i][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]].values,window) for i in list(set(df.index))])
+        
+        #remove lines whose cycle time is less than window-size
+        
+        
+        X = df_window[:,:,:14]
+        Y = df_window[:,29,14]
+        
+        
+        self.X = X.reshape((X.shape[0],1,window,14))
+        self.Y = Y
+        self.transform = transform
+        self.train = train
+        
+  def __len__(self):
+        'Denotes the total number of samples'
+        return self.X.shape[0]
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        #print(self.Y[index])
+        return self.X[index], self.Y[index]
+```
+
+```{python}
+class CNN(nn.Module):
+    def __init__(self, window_size =9, dropout_ratio = 0.5, initialization='xavier', hidden_neurons=100, activation = 'tanh'):
+        
+        super().__init__()
+        
+        #self.activ = torch.relu if activation == "relu" else torch.tanh
+        init = nn.init.kaiming_normal_ if initialization=="kaiming" else nn.init.xavier_normal_
+        
+        self.conv1 = nn.Conv2d(1,10,kernel_size=(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh1 = nn.Tanh()
+        init(self.conv1.weight)
+        nn.init.constant_(self.conv1.bias, 0)
+        
+        self.conv2 = nn.Conv2d(10,10,kernel_size=(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh2 = nn.Tanh()
+        init(self.conv2.weight)
+        nn.init.constant_(self.conv2.bias, 0)
+        
+        self.conv3 = nn.Conv2d(10,10,(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh3 = nn.Tanh()
+        init(self.conv3.weight)
+        nn.init.constant_(self.conv3.bias, 0)
+        
+        self.conv4 = nn.Conv2d(10,10,(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh4 = nn.Tanh()
+        init(self.conv4.weight)
+        nn.init.constant_(self.conv4.bias, 0)
+        
+        self.conv5 = nn.Conv2d(10,1,(3,1),padding = (1,0))
+        self.tanh5 = nn.Tanh()
+        init(self.conv5.weight)
+        nn.init.constant_(self.conv5.bias, 0)
+        
+        self.dropout = nn.Dropout(p=dropout_ratio)
+        
+        self.fc1 = nn.Linear(in_features = 420, out_features = hidden_neurons)
+        self.tanh_fc1 = nn.Tanh()
+        nn.init.xavier_normal_(self.fc1.weight)
+        nn.init.constant_(self.fc1.bias, 0)
+        
+        self.fc2 = nn.Linear(in_features = hidden_neurons, out_features = 1)
+        #self.tanh_fc2 = nn.Tanh()
+        nn.init.xavier_normal_(self.fc2.weight)
+        nn.init.constant_(self.fc2.bias, 0)
+        
+    def forward(self,x):
+        tanh1 = self.tanh1(self.conv1(x))
+        tanh2 = self.tanh2(self.conv2(tanh1))
+        tanh3 = self.tanh3(self.conv3(tanh2))
+        tanh4 = self.tanh4(self.conv4(tanh3))
+        tanh5 = self.tanh5(self.conv5(tanh4))
+        dropout1 = self.dropout(tanh5)
+        x_reshape = dropout1.view(-1,30*14)
+        tanh6 = self.tanh_fc1(self.fc1(x_reshape))
+        predict = self.fc2(tanh6)
+        #print(predict)
+        return predict
+```
+
+```{python}
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super(RMSELoss,self).__init__()
+
+    def forward(self,x,y):
+        criterion = nn.MSELoss()
+        loss = torch.sqrt(criterion(x, y))
+        return loss
+```
+
+```{python}
+def check_accuracy_part34(loader, model, device = torch.device('cpu'), print_graph = False):
+    MSE = nn.MSELoss()
+    dtype = torch.float32
+    if loader.dataset.train:
+        print('Checking accuracy on validation set')
+    else:
+        print('Checking accuracy on test set')   
+    model.eval()  # set model to evaluation mode
+    loss = 0
+    with torch.no_grad():
+        for t, (x,y) in enumerate(loader):
+            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
+            y = y.to(device=device, dtype=torch.long)
+            score = model(x)
+            loss += MSE(score,y.to(device=device, dtype=dtype))
+        loss = np.sqrt(loss/(t+1))
+        print('RMSE : (%.2f)' % (loss))
+        if print_graph:
+            plt.plot(np.array(score))
+            plt.plot(np.array(y))
+            plt.show()
+        #print('score : (%.2f) , target : (%.2f)' %(score, y))
+```
+
+```{python}
+def train_model(model, optimizer,loader_train, loader_val = None, epochs = 1,USE_GPU = True,print_every = 10):
+    
+    if USE_GPU and torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+    model = model.to(device = device)
+    hold_loss = []
+    RMSE = RMSELoss()
+    MSE = nn.MSELoss()
+    
+    dtype = torch.float32 # we will be using float throughout this tutorial
+    
+    weight1 = []
+    weight2 = []
+    weight3 = []
+    weight4 = []
+    weight5 = []
+    weightfc1 = []
+    weightfc2 = []
+    
+    
+    for e,epoch in enumerate(range(epochs)):
+        cum_loss = 0
+       # if e%10 == 0 and e>0:
+        #    for param_group in optimizer.param_groups:
+         #       param_group['lr']*=0.1
+        print('Epoch %d,    lr %f' % (e,optimizer.param_groups[0]['lr']))
+        for t, (x, y) in enumerate(loader_train):
+            model.train()  # put model to training mode
+            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
+            y = y.to(device=device, dtype=dtype)
+            optimizer.zero_grad()            
+            scores = model(x)
+            loss = RMSE(scores, y)
+            cum_loss += loss.data
+            loss.backward()
+            optimizer.step()
+            weight1.append(model.conv1.weight)
+            weight2.append(model.conv2.weight)
+            weight3.append(model.conv3.weight)
+            weight4.append(model.conv4.weight)
+            weight5.append(model.conv5.weight)
+            weightfc1.append(model.fc1.weight)
+            weightfc2.append(model.fc2.weight)
+            if t % print_every == 0:
+                print('Iteration %d, loss = %.4f' % (t, loss))
+                if loader_val:
+                    check_accuracy_part34(loader_val, model, device)
+                print()
+                
+        hold_loss.append(cum_loss/(t+1))
+    if loader_val:
+        check_accuracy_part34(loader_val, model, print_graph=False)
+    plt.figure()
+    plt.plot(np.array(hold_loss))
+    return [weight1,weight2,weight3,weight4,weight5,weightfc1,weightfc2]
+```
+
+```{python}
+def get_train_valid_loader(data = 1, batch_size = 512, valid_size = 0.05, shuffle = True, seed = 42):
+
+    trainset = Dataset_Nasa(dataset = data, train = True)
+    valset = Dataset_Nasa(dataset = data, train = True)
+    
+    num_train = len(trainset)
+    indices = list(range(num_train))
+    split = int(np.floor(valid_size * num_train))    
+    
+    if shuffle:
+        np.random.seed(seed)
+        np.random.shuffle(indices)
+    
+    train_idx, valid_idx = indices[split:], indices[:split]
+    train_sampler = sampler.SubsetRandomSampler(train_idx)
+    valid_sampler = sampler.SubsetRandomSampler(valid_idx)
+    
+    loader_train = DataLoader(trainset, batch_size=batch_size, sampler = train_sampler)
+    loader_val = DataLoader(valset, batch_size=batch_size, sampler = valid_sampler)
+    #return loader_train
+    return (loader_train, loader_val)
+```
+
+```{python}
+trainsets = pkl.load(open("Datasets/NASA C-MAPSS/trainsets.p","rb"))
+testsets = pkl.load(open("Datasets/NASA C-MAPSS/testsets.p","rb"))
+
+train, val = get_train_valid_loader(data = 4)
+model = CNN()
+learning_rate = 1e-3
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+train_model(model,optimizer, train, loader_val = val, epochs = 10)
+```
+
+```{python}
+model2 = CNN(activation='relu')
+optimizer2 = optim.Adam(model2.parameters(), lr=learning_rate)
+
+train_model(model2,optimizer2, train, loader_val = val, epochs = 10)
+```
+
+```{python}
+weight1 = w[0]
+weight1_1 = [weight1[i][0].data.numpy()[0].squeeze() for i in range(len(weight1))]
+for i in range(9):
+    plt.plot([weight1_1[j][i] for j in range(len(weight1_1))])
+plt.show()
+```
+
+```{python}
+weight1_1[0]
+```
+
+```{python}
+[weight1_1[j][0] for j in range(len(weight1_1))]
+```
+
+```{python}
+trainset = Dataset_Nasa(dataset=4, train = True)
+loader_train = DataLoader(trainset, batch_size = 512)
+model = CNN(activation='relu', hidden_neurons=100)
+model2 = CNN(activation='tanh', hidden_neurons=100)
+learning_rate = 1e-3
+#optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+#optimizer2 = optim.Adam(model2.parameters(), lr=learning_rate)
+train_model(model,optimizer, loader_train, epochs = 10)
+train_model(model2,optimizer2, loader_train, epochs = 10)
+```
+
+```{python}
+class Dataset_Nasa_sorted(torch.utils.data.Dataset):
+  def __init__(self, dataset, transform=None, train = True, window = 30):
+        'Initialization'
+        df = trainsets["FD00"+str(dataset)] if train else testsets["FD00"+str(dataset)]
+        df = df.drop(list(set(df[df["cycle"] > 30].index.tolist()) ^ set(range(1,df.index.tolist()[-1]+1))), axis = 0)
+        if not train:
+            df_last = [df.loc[i].set_index('cycle').iloc[(-window-1):-1] for i in list(set(df.index.tolist()))]
+            indices = [df_last[i]["RUL"].iloc[-1] for i in range(237)]
+            permutation = sorted(range(len(indices)), key=lambda k: indices[k])
+            sorted_testset = [df_last[i] for i in permutation]
+            df_window = np.vstack([rwindows(a[["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]].values,window) for a in sorted_testset]).reshape((-1,window,15))
+        else:
+            df_window = np.vstack([rwindows(df.loc[i][["sensor 2","sensor 3","sensor 4","sensor 7","sensor 8","sensor 9","sensor 11","sensor 12","sensor 13","sensor 14","sensor 15","sensor 17","sensor 20","sensor 21","RUL"]].values,window) for i in list(set(df.index))])
+        
+        #remove lines whose cycle time is less than window-size
+        
+        
+        X = df_window[:,:,:14]
+        Y = df_window[:,29,14]
+        
+        
+        self.X = X.reshape((X.shape[0],1,window,14))
+        self.Y = Y
+        self.transform = transform
+        self.train = train
+        
+  def __len__(self):
+        'Denotes the total number of samples'
+        return self.X.shape[0]
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        return self.X[index], self.Y[index]
+```
+
+```{python}
+testset = Dataset_Nasa_sorted(dataset=4, train = False)
+loader_test = DataLoader(testset, batch_size = 237)
+
+check_accuracy_part34(loader_test,model, print_graph = True)
+```
+
+```{python}
+testset = Dataset_Nasa_sorted(dataset=4, train = False)
+loader_test = DataLoader(testset, batch_size = 237)
+
+check_accuracy_part34(loader_test,model2, print_graph = True)
+```
+
+```{python}
+
+
+model
+```
+
+```{python}
+check_accuracy_part34(loader_test,model2, print_graph = True)
+```
+
+# VISUALISATION
+
+```{python}
+import matplotlib as mpl
+```
+
+```{python}
+def visualize_act_map(subset,train,model,datapoint):
+    dataset = Dataset_Nasa(dataset = subset, train = train)
+    act= {}
+    def get_activation(name):
+        def hook(model, input, output):
+            act[name] = output.detach().squeeze()
+        return hook
+
+    model.conv1.register_forward_hook(get_activation('conv1'))
+    model.conv2.register_forward_hook(get_activation('conv2'))
+    model.conv3.register_forward_hook(get_activation('conv3'))
+    model.conv4.register_forward_hook(get_activation('conv4'))
+    model.conv5.register_forward_hook(get_activation('conv5'))
+    data = torch.from_numpy(dataset[datapoint][0]).view(-1,1,30,14)
+    output = model(data.to(dtype = torch.float32), torch.tanh)
+
+    ax = []
+    rows = 4
+    columns = 5
+    fig = plt.figure(figsize=(13,20))
+    for i in range(rows):
+        for j in range(columns):
+            ax.append( fig.add_subplot(rows+1, columns, i*columns + j+1) )
+            ax[-1].set_title("layer : "+str(i+1) + ", act_map : "+str(j+1)+"   ")  # set title
+            plt.imshow(act["conv"+str(i+1)][j], alpha=1)
+    ax.append( fig.add_subplot(rows+1, columns, (columns)*(rows)+1) )
+    ax[-1].set_title("layer : "+str(5))  # set title
+    plt.imshow(act5, alpha=1)
+    plt.show()
+```
+
+```{python}
+visualize_act_map(4,True,model,0)
+```
+
+```{python}
+visualize_act_map(4,True,model,25428)
+```
+
+```{python}
+import torchviz
+```
+
+```{python}
+torchviz.make_dot(scores.mean(), params = dict(model.named_parameters()))
+```
+
+```{python}
+for t,(x,y) in enumerate(loader_train):
+    if t == 0:
+        scores = model(x.to(dtype = torch.float32),torch.tanh)
+```
+
+```{python}
+scores.mean()
+```
+
+```{python}
+weight = model2.conv1.weight.data.numpy()
+ax = []
+fig = plt.figure(figsize=(13,20))
+for i in range(10):
+    ax.append( fig.add_subplot(1, 10, i+1 ))
+    ax[-1].set_title("filter :" + str(i+1))  # set title
+    plt.imshow(weight[i,0,:,0].reshape((9,1)), alpha=1, cmap = 'gray')
+    plt.clim(-1,1)
+plt.colorbar()
+plt.show()
+```
+
+```{python}
+weight = model2.conv1.weight.data.numpy()
+plt.imshow(np.transpose(weight[:,0,:,0]))
+plt.clim(-1,1)
+```
+
+```{python}
+np.transpose(weight[:,0,:,0])
+```
+
+```{python}
+weight[0,0,:,0].reshape((9,1))
+```
+
+```{python}
+plt.imshow(weight[0,0,:,0].reshape((9,1)))
+plt.clim(-1,1)
+plt.colorbar()
+```
+
+```{python}
+model.conv1.weight
+```
+
+# Classif ?
+
+```{python}
+class CNN_classif(nn.Module):
+    def __init__(self, window_size =9, dropout_ratio = 0.5, initialization='xavier', hidden_neurons=100, activation = 'tanh'):
+        
+        super().__init__()
+        
+        #self.activ = torch.relu if activation == "relu" else torch.tanh
+        init = nn.init.kaiming_normal_ if initialization=="kaiming" else nn.init.xavier_normal_
+        
+        self.conv1 = nn.Conv2d(1,10,kernel_size=(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh1 = nn.Tanh()
+        init(self.conv1.weight)
+        nn.init.constant_(self.conv1.bias, 0)
+        
+        self.conv2 = nn.Conv2d(10,10,kernel_size=(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh2 = nn.Tanh()
+        init(self.conv2.weight)
+        nn.init.constant_(self.conv2.bias, 0)
+        
+        self.conv3 = nn.Conv2d(10,10,(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh3 = nn.Tanh()
+        init(self.conv3.weight)
+        nn.init.constant_(self.conv3.bias, 0)
+        
+        self.conv4 = nn.Conv2d(10,10,(window_size,1),padding = ((window_size-1)//2,0))
+        self.tanh4 = nn.Tanh()
+        init(self.conv4.weight)
+        nn.init.constant_(self.conv4.bias, 0)
+        
+        self.conv5 = nn.Conv2d(10,1,(3,1),padding = (1,0))
+        self.tanh5 = nn.Tanh()
+        init(self.conv5.weight)
+        nn.init.constant_(self.conv5.bias, 0)
+        
+        self.dropout = nn.Dropout(p=dropout_ratio)
+        
+        self.fc1 = nn.Linear(in_features = 420, out_features = hidden_neurons)
+        self.tanh_fc1 = nn.Tanh()
+        nn.init.xavier_normal_(self.fc1.weight)
+        nn.init.constant_(self.fc1.bias, 0)
+        
+        self.fc2 = nn.Linear(in_features = hidden_neurons, out_features = 131)
+        #self.tanh_fc2 = nn.Tanh()
+        nn.init.xavier_normal_(self.fc2.weight)
+        nn.init.constant_(self.fc2.bias, 0)
+        
+    def forward(self,x):
+        tanh1 = self.tanh1(self.conv1(x))
+        tanh2 = self.tanh2(self.conv2(tanh1))
+        tanh3 = self.tanh3(self.conv3(tanh2))
+        tanh4 = self.tanh4(self.conv4(tanh3))
+        tanh5 = self.tanh5(self.conv5(tanh4))
+        dropout1 = self.dropout(tanh5)
+        x_reshape = dropout1.view(-1,30*14)
+        tanh6 = self.tanh_fc1(self.fc1(x_reshape))
+        predict = self.fc2(tanh6)
+        #print(predict)
+        return predict
+```
+
+```{python}
+def train_model_classif(model, optimizer,loader_train, loader_val = None, epochs = 1,USE_GPU = True,print_every = 10):
+    
+    if USE_GPU and torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+    model = model.to(device = device)
+    hold_loss = []
+    
+    dtype = torch.float32 # we will be using float throughout this tutorial
+    
+    
+    for e,epoch in enumerate(range(epochs)):
+        cum_loss = 0
+       # if e%10 == 0 and e>0:
+        #    for param_group in optimizer.param_groups:
+         #       param_group['lr']*=0.1
+        print('Epoch %d,    lr %f' % (e,optimizer.param_groups[0]['lr']))
+        for t, (x, y) in enumerate(loader_train):
+            model.train()  # put model to training mode
+            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
+            y = y.to(device=device, dtype=torch.long)            
+            scores = model(x)
+            loss = nn.functional.cross_entropy(scores,y)
+            cum_loss += loss.data
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            if t % print_every == 0:
+                print('Iteration %d, loss = %.4f' % (t, loss))
+                if loader_val:
+                    check_accuracy_classif(loader_val, model, device)
+                print()
+        hold_loss.append(cum_loss/(t+1))
+    plt.figure()
+    plt.plot(np.array(hold_loss))
+```
+
+```{python}
+def check_accuracy_classif(loader, model, device = torch.device('cpu'), print_graph = False):
+    dtype = torch.float32
+    if loader.dataset.train:
+        print('Checking accuracy on validation set')
+    else:
+        print('Checking accuracy on test set')   
+    model.eval()  # set model to evaluation mode
+    num_correct = 0
+    num_samples = 0
+    loss = 0
+    with torch.no_grad():
+        for x,y in loader:
+            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
+            y = y.to(device=device, dtype=torch.long)
+            scores = model(x)
+            _, preds = scores.max(1)
+            num_correct += (preds == y).sum()
+            num_samples += preds.size(0)
+        acc = float(num_correct)/num_samples
+        print('Got : %d / %d correct  (%.2f)' %(num_correct, num_samples, 100*acc))
+        if print_graph:
+            plt.scatter(range(len(preds)),np.array(preds))
+            plt.plot(np.array(y))
+            plt.show()
+```
+
+```{python}
+trainsets = pkl.load(open("Datasets/NASA C-MAPSS/trainsets.p","rb"))
+testsets = pkl.load(open("Datasets/NASA C-MAPSS/testsets.p","rb"))
+
+train, val = get_train_valid_loader(data = 4)
+model = CNN_classif()
+learning_rate = 1e-3
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+train_model_classif(model,optimizer, train, loader_val = val, epochs = 30)
+```
+
+```{python}
+trainset = Dataset_Nasa(dataset=4, train = True)
+loader_train = DataLoader(trainset, batch_size = 512)
+model = CNN_classif()
+learning_rate = 1e-3
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+train_model_classif(model,optimizer, loader_train, epochs = 100)
+```
+
+```{python}
+check_accuracy_classif(loader_test,model, print_graph = True)
+```
