@@ -87,10 +87,6 @@ df_RUL.sort_values(by=['dataset_id', 'unit_id'], inplace=True)
 ```
 
 ```{python}
-df_train
-```
-
-```{python}
 RUL_train = df_train.groupby(['dataset_id', 'unit_id'])['cycle'].max()
 
 RUL_test = df_test.groupby(['dataset_id', 'unit_id'])['cycle'].max() + df_RUL.groupby(['dataset_id', 'unit_id'])[
@@ -398,26 +394,6 @@ plt.show()
 ```
 
 ```{python}
-weight1_1[0]
-```
-
-```{python}
-[weight1_1[j][0] for j in range(len(weight1_1))]
-```
-
-```{python}
-trainset = Dataset_Nasa(dataset=4, train = True)
-loader_train = DataLoader(trainset, batch_size = 512)
-model = CNN(activation='relu', hidden_neurons=100)
-model2 = CNN(activation='tanh', hidden_neurons=100)
-learning_rate = 1e-3
-#optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-#optimizer2 = optim.Adam(model2.parameters(), lr=learning_rate)
-train_model(model,optimizer, loader_train, epochs = 10)
-train_model(model2,optimizer2, loader_train, epochs = 10)
-```
-
-```{python}
 class Dataset_Nasa_sorted(torch.utils.data.Dataset):
   def __init__(self, dataset, transform=None, train = True, window = 30):
         'Initialization'
@@ -458,23 +434,6 @@ testset = Dataset_Nasa_sorted(dataset=4, train = False)
 loader_test = DataLoader(testset, batch_size = 237)
 
 check_accuracy_part34(loader_test,model, print_graph = True)
-```
-
-```{python}
-testset = Dataset_Nasa_sorted(dataset=4, train = False)
-loader_test = DataLoader(testset, batch_size = 237)
-
-check_accuracy_part34(loader_test,model2, print_graph = True)
-```
-
-```{python}
-
-
-model
-```
-
-```{python}
-check_accuracy_part34(loader_test,model2, print_graph = True)
 ```
 
 # VISUALISATION
@@ -532,16 +491,6 @@ torchviz.make_dot(scores.mean(), params = dict(model.named_parameters()))
 ```
 
 ```{python}
-for t,(x,y) in enumerate(loader_train):
-    if t == 0:
-        scores = model(x.to(dtype = torch.float32),torch.tanh)
-```
-
-```{python}
-scores.mean()
-```
-
-```{python}
 weight = model2.conv1.weight.data.numpy()
 ax = []
 fig = plt.figure(figsize=(13,20))
@@ -578,7 +527,7 @@ plt.colorbar()
 model.conv1.weight
 ```
 
-# Classif ?
+# Classification 
 
 ```{python}
 class CNN_classif(nn.Module):
